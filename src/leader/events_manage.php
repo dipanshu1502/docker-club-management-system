@@ -1,105 +1,174 @@
 <?php
 session_start();
-include "../config/db.php";
 
-if ($_SESSION['role'] != 'leader') {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
     header("Location: ../auth/login.php");
     exit;
 }
 
-$leader_id = $_SESSION['user_id'];
-
-/* Leader ka club fetch */
-$clubRes = mysqli_query($conn,
-    "SELECT club_id, club_name FROM clubs WHERE leader_id='$leader_id'"
-);
-$club = mysqli_fetch_assoc($clubRes);
-
-/* EVENT CREATE / REQUEST */
-if (isset($_POST['create_event'])) {
-    $title = mysqli_real_escape_string($conn, $_POST['title']);
-    $desc  = mysqli_real_escape_string($conn, $_POST['description']);
-    $date  = $_POST['event_date'];
-
-    mysqli_query($conn, "
-        INSERT INTO events (club_id, title, description, event_date, approval_status, created_by)
-        VALUES (
-            '{$club['club_id']}',
-            '$title',
-            '$desc',
-            '$date',
-            'pending',
-            '$leader_id'
-        )
-    ");
-
-    $success = "Event request sent to admin for approval!";
-}
-
-/* Leader ke events */
-$events = mysqli_query($conn, "
-    SELECT * FROM events 
-    WHERE club_id='{$club['club_id']}'
-    ORDER BY created_at DESC
-");
-
+include "../config/db.php";
 include "../includes/header.php";
 include "../includes/sidebar.php";
+
+/* ==============================
+   ASSIGN / CHANGE CLUB LEADER
+============================== */
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['leader_id'], $_POST['club_id'])) {
+
+    $club_id   = $_POST['club_id'];
+    $leader_id = $_POST['leader_id'];
+
+    // Old leader fetch
+    $old = mysqli_fetch_assoc(mysqli_query($conn,"
+        SELECT leader_id 
+        FROM clubs 
+        WHERE club_id='$club_id'
+    "));
+
+    $old_leader = $old['leader_id'];
+
+    // New leader assign
+    mysqli_query($conn,"
+        UPDATE clubs 
+        SET leader_id='$leader_id' 
+        WHERE club_id='$club_id'
+    ");
+
+    // New leader role = leader
+    mysqli_query($conn,"
+        UPDATE users 
+        SET role='leader' 
+        WHERE user_id='$leader_id'
+    ");
+
+    // Old leader role = student
+    if ($old_leader && $old_leader != $leader_id) {
+
+        mysqli_query($conn,"
+            UPDATE users 
+            SET role='student' 
+            WHERE user_id='$old_leader'
+        ");
+    }
+
+    header("Location: clubs_manage.php");
+    exit;
+}
+
+/* ==============================
+   DELETE CLUB
+============================== */
+
+if (isset($_GET['delete'])) {
+
+    $club_id = $_GET['delete'];
+
+    // Club leader fetch
+    $club = mysqli_fetch_assoc(mysqli_query($conn,"
+        SELECT leader_id 
+        FROM clubs 
+        WHERE club_id='$club_id'
+    "));
+
+    // Leader role back to student
+    if ($club && $club['leader_id']) {
+
+        $leader_id = $club['leader_id'];
+
+        mysqli_query($conn,"
+            UPDATE users 
+            SET role='student' 
+            WHERE user_id='$leader_id'
+        ");
+    }
+
+    // Delete club
+    mysqli_query($conn,"
+        DELETE FROM clubs 
+        WHERE club_id='$club_id'
+    ");
+
+    header("Location: clubs_manage.php");
+    exit;
+}
+
+/* ==============================
+   FETCH CLUBS
+============================== */
+
+$clubs = mysqli_query($conn, "
+    SELECT c.club_id, c.club_name,
+           l.name AS leader_name,
+           f.name AS faculty_name
+    FROM clubs c
+    LEFT JOIN users l ON c.leader_id = l.user_id
+    LEFT JOIN users f ON c.faculty_id = f.user_id
+");
+
 ?>
 
-<h3>Manage Events (<?= $club['club_name'] ?>)</h3>
+<h2>Manage Clubs</h2>
 
-<?php if (isset($success)) { ?>
-    <div class="alert alert-success"><?= $success ?></div>
-<?php } ?>
+<table class="table table-bordered mt-3 align-middle">
 
-<!-- ✅ EVENT REQUEST FORM -->
-<div class="card p-3 mb-4">
-    <h5>Create / Request New Event</h5>
-
-    <form method="POST">
-        <input type="text" name="title" class="form-control mb-2"
-               placeholder="Event Title" required>
-
-        <textarea name="description" class="form-control mb-2"
-                  placeholder="Event Description"></textarea>
-
-        <input type="date" name="event_date" class="form-control mb-2" required>
-
-        <button name="create_event" class="btn btn-primary">
-            Send Event Request
-        </button>
-    </form>
-</div>
-
-<!-- 📋 EVENT LIST -->
-<div class="card p-3">
-    <h5>Your Events</h5>
-
-    <table class="table table-bordered">
+    <thead>
         <tr>
-            <th>Event</th>
-            <th>Date</th>
-            <th>Status</th>
+            <th>Club Name</th>
+            <th>Leader</th>
+            <th>Faculty</th>
+            <th class="text-center">Actions</th>
+        </tr>
+    </thead>
+
+    <tbody>
+
+    <?php while ($c = mysqli_fetch_assoc($clubs)) { ?>
+
+        <tr>
+
+            <td>
+                <?= htmlspecialchars($c['club_name']) ?>
+            </td>
+
+            <td>
+                <?= $c['leader_name'] 
+                    ? htmlspecialchars($c['leader_name']) 
+                    : '<span class="text-muted">Not Assigned</span>' ?>
+            </td>
+
+            <td>
+                <?= $c['faculty_name'] 
+                    ? htmlspecialchars($c['faculty_name']) 
+                    : '<span class="text-muted">Not Assigned</span>' ?>
+            </td>
+
+            <td class="text-center">
+
+                <a href="club_details.php?id=<?= $c['club_id'] ?>"
+                   class="btn btn-info btn-sm mb-1">
+                    View Details
+                </a>
+
+                <a href="club_members.php?club_id=<?= $c['club_id'] ?>"
+                   class="btn btn-secondary btn-sm mb-1">
+                    View Members
+                </a>
+
+                <a href="clubs_manage.php?delete=<?= $c['club_id'] ?>"
+                   onclick="return confirm('Are you sure you want to delete this club?')"
+                   class="btn btn-danger btn-sm mb-1">
+                    Delete
+                </a>
+
+            </td>
+
         </tr>
 
-        <?php while ($e = mysqli_fetch_assoc($events)) { ?>
-            <tr>
-                <td><?= $e['title'] ?></td>
-                <td><?= $e['event_date'] ?></td>
-                <td>
-                    <?php
-                        if ($e['approval_status'] == 'pending')
-                            echo "<span class='badge bg-warning'>Pending</span>";
-                        elseif ($e['approval_status'] == 'approved')
-                            echo "<span class='badge bg-success'>Approved</span>";
-                        else
-                            echo "<span class='badge bg-danger'>Rejected</span>";
-                    ?>
-                </td>
-            </tr>
-        <?php } ?>
-    </table>
-</div>
+    <?php } ?>
+
+    </tbody>
+
+</table>
 
 <?php include "../includes/footer.php"; ?>
