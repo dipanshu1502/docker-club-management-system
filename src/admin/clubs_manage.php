@@ -170,3 +170,5 @@ $clubs = mysqli_query($conn, "
     </tbody>
 
 </table>
+
+<?php include "../includes/footer.php"; ?>

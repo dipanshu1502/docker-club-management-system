@@ -1,5 +1,3 @@
-<?php include "../includes/footer.php"; ?>
-
 <?php
 session_start();
 include "../config/db.php";
